@@ -1,0 +1,20 @@
+{
+  "name": "healthcheck",
+  "version": "1.0.0",
+  "description": "healty check function for aws lambda",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "lambda",
+    "health",
+    "check"
+  ],
+  "author": "csgear@live.com",
+  "license": "ISC",
+  "dependencies": {
+    "node-fetch": "^3.2.6"
+  }
+}
