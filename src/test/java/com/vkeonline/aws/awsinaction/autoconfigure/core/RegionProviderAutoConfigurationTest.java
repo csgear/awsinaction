@@ -1,0 +1,141 @@
+package com.vkeonline.aws.awsinaction.autoconfigure.core;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.io.IOException;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.test.context.FilteredClassLoader;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.test.util.ReflectionTestUtils;
+import software.amazon.awssdk.profiles.ProfileFile;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.regions.providers.AwsProfileRegionProvider;
+import software.amazon.awssdk.regions.providers.AwsRegionProvider;
+import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain;
+import software.amazon.awssdk.regions.providers.InstanceProfileRegionProvider;
+
+/**
+ * @author Xiaojun.Yang
+ */
+class RegionProviderAutoConfigurationTest {
+    private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
+        .withConfiguration(AutoConfigurations.of(RegionProviderAutoConfiguration.class));
+
+    @Test
+    void autoDetectionConfigured_noConfigurationProvided_DefaultAwsRegionProviderChainDelegateConfigured() {
+        this.contextRunner.run((context) -> {
+            assertThat(context.getBean(DefaultAwsRegionProviderChain.class)).isNotNull();
+        });
+    }
+
+    @Test
+    void autoDetectionConfigured_emptyStaticRegionConfigured_DefaultAwsRegionProviderChainDelegateConfigured() {
+        this.contextRunner.withPropertyValues("spring.cloud.aws.region.static:").run((context) -> {
+            assertThat(context.getBean(DefaultAwsRegionProviderChain.class)).isNotNull();
+        });
+    }
+
+    @Test
+    void staticRegionConfigured_staticRegionProviderWithConfiguredRegionConfigured() {
+        this.contextRunner.withPropertyValues("spring.cloud.aws.region.static:eu-west-1").run((context) -> {
+            AwsRegionProvider awsRegionProvider = context.getBean(AwsRegionProvider.class);
+
+            @SuppressWarnings("unchecked")
+            List<AwsRegionProvider> regionProviders = (List<AwsRegionProvider>) ReflectionTestUtils
+                .getField(awsRegionProvider, "providers");
+            assertThat(regionProviders).hasSize(1).hasOnlyElementsOfType(StaticRegionProvider.class);
+
+            StaticRegionProvider regionProvider = (StaticRegionProvider) regionProviders.get(0);
+            assertThat(regionProvider.getRegion()).isEqualTo(Region.EU_WEST_1);
+        });
+    }
+
+    @Test
+    void customRegionConfigured() {
+        this.contextRunner.withUserConfiguration(CustomRegionProviderConfiguration.class).run((context) -> {
+            AwsRegionProvider regionProvider = context.getBean(AwsRegionProvider.class);
+            assertThat(regionProvider).isNotNull().isInstanceOf(CustomRegionProvider.class);
+        });
+
+    }
+
+    @Test
+    void regionProvider_profileNameAndPathConfigured_profileRegionProviderConfiguredWithCustomProfile()
+        throws IOException {
+        this.contextRunner.withPropertyValues("spring.cloud.aws.region.profile.name:customProfile",
+                "spring.cloud.aws.region.profile.path:"
+                    + new ClassPathResource(getClass().getSimpleName() + "-profile", getClass()).getFile()
+                    .getAbsolutePath())
+            .run((context) -> {
+                AwsRegionProvider awsRegionProvider = context.getBean("regionProvider", AwsRegionProvider.class);
+                assertThat(awsRegionProvider).isNotNull();
+
+                @SuppressWarnings("unchecked")
+                List<AwsRegionProvider> regionProviders = (List<AwsRegionProvider>) ReflectionTestUtils
+                    .getField(awsRegionProvider, "providers");
+                assertThat(regionProviders).hasSize(1).hasOnlyElementsOfType(AwsProfileRegionProvider.class);
+
+                AwsProfileRegionProvider regionProvider = (AwsProfileRegionProvider) regionProviders.get(0);
+                assertThat(regionProvider.getRegion()).isEqualTo(Region.EU_WEST_1);
+            });
+    }
+
+    @Test
+    void regionProvider_instanceProfileConfigured_configuresInstanceProfileCredentialsProvider() {
+        this.contextRunner.withPropertyValues("spring.cloud.aws.region.instance-profile:true").run((context) -> {
+            AwsRegionProvider awsCredentialsProvider = context.getBean("regionProvider", AwsRegionProvider.class);
+            assertThat(awsCredentialsProvider).isNotNull();
+
+            @SuppressWarnings("unchecked")
+            List<AwsRegionProvider> credentialsProviders = (List<AwsRegionProvider>) ReflectionTestUtils
+                .getField(awsCredentialsProvider, "providers");
+            assertThat(credentialsProviders).hasSize(1).hasOnlyElementsOfType(
+                InstanceProfileRegionProvider.class);
+        });
+    }
+
+    @Test
+    void isNotCreatedWhenAwsRegionModuleIsNotInClasspath() {
+        this.contextRunner.withClassLoader(new FilteredClassLoader(AwsRegionProvider.class)).run(context -> {
+            assertThat(context).doesNotHaveBean(RegionProviderAutoConfiguration.class);
+        });
+    }
+
+    @Test
+    void isNotCreatedWhenAwsProfilesModuleIsNotInClasspath() {
+        this.contextRunner.withClassLoader(new FilteredClassLoader(ProfileFile.class)).run(context -> {
+            assertThat(context).doesNotHaveBean(RegionProviderAutoConfiguration.class);
+        });
+    }
+
+    @Test
+    void isNotCreatedWhenCoreModuleIsNotInClasspath() {
+        this.contextRunner.withClassLoader(new FilteredClassLoader(StaticRegionProvider.class)).run(context -> {
+            assertThat(context).doesNotHaveBean(RegionProviderAutoConfiguration.class);
+        });
+    }
+
+    @Configuration
+    static class CustomRegionProviderConfiguration {
+
+        @Bean
+        public AwsRegionProvider customRegionProvider() {
+            return new CustomRegionProvider();
+        }
+
+    }
+
+    static class CustomRegionProvider implements AwsRegionProvider {
+
+        @Override
+        public Region getRegion() {
+            return null;
+        }
+
+    }
+}
